@@ -1,0 +1,25 @@
+[package]
+name = "benchmark"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+axum = "0.8.1"
+chrono = "0.4.40"
+dotenvy = "0.15.7"
+futures-util = "0.3.31"
+leveldb = "0.8.6"
+mongodb = "3.2.2"
+reqwest = { version = "0.12.14", features = ["json"] }
+rocksdb = {version = "0.23.0", default-features = false}
+serde = { version = "1.0.219", features = ["derive"] }
+serde_json = "1.0.140"
+serde_with = "3.12.0"
+sqlx = { version = "0.8.3", features = ["runtime-tokio-rustls", "postgres","derive"] }
+surrealdb = "2.2.1"
+tokio = { version = "1.44.0", features = ["full"] }
+tokio-postgres = "0.7.13"
+tokio-tungstenite = "0.26.2"
+
+[dev-dependencies]
+criterion = "0.5.1"
