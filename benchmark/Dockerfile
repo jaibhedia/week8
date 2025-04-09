@@ -1,12 +1,12 @@
 FROM rust:latest
 
-# Add cmake to the installed packages
+# Add necessary packages
 RUN apt-get update && apt-get install -y \
     pkg-config \
     libssl-dev \
     libclang-dev \
     build-essential \
-    cmake \  # Add this line
+    cmake \
     curl \
     && rm -rf /var/lib/apt/lists/*
 
