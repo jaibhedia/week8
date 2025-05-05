@@ -1,7 +1,8 @@
 use chrono::{Duration, Utc};
+use dotenvy::dotenv;
 use std::env;
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct Config {
     pub api_url: String,
     pub interval: String,
@@ -13,12 +14,12 @@ pub struct Config {
     pub mongodb_uri: String,
     pub db_name: String,
     pub host: String,
-    pub port: u16,
+    pub port: String,
 }
 
 impl Config {
     pub fn load() -> Self {
-        dotenvy::dotenv().ok();
+        dotenv().ok(); // Load from .env file, but don't panic if it doesn't exist
 
         let api_url = env::var("API_URL")
             .unwrap_or_else(|_| "https://midgard.ninerealms.com/v2/history/runepool".to_string());
@@ -28,20 +29,20 @@ impl Config {
         let initial_from = six_months_ago.timestamp() as u64;
 
         let rocksdb_path =
-            env::var("ROCKSDB_PATH").unwrap_or_else(|_| "/tmp/data/rocksdb".to_string());
+            env::var("ROCKSDB_PATH").unwrap_or_else(|_| "./my_rocksdb".to_string());
         let leveldb_path =
-            env::var("LEVELDB_PATH").unwrap_or_else(|_| "/tmp/data/leveldb".to_string());
+            env::var("LEVELDB_PATH").unwrap_or_else(|_| "./data/leveldb".to_string());
         let surrealdb_url =
             env::var("SURREALDB_URL").unwrap_or_else(|_| "127.0.0.1:8000".to_string());
         let psql_conn = env::var("PSQL_CONN")
-            .unwrap_or_else(|_| "postgres://user:password@localhost:5432/runepool".to_string());
+            .unwrap_or_else(|_| "postgresql://postgres:postgres@localhost:5432/midgard".to_string());
         let mongodb_uri = env::var("MONGODB_URI")
-            .unwrap_or_else(|_| "mongodb://localhost:27017/runepool".to_string());
+            .unwrap_or_else(|_| "mongodb://localhost:27017".to_string());
         let db_name = env::var("DB_NAME")
-            .unwrap_or_else(|_| "runepool".to_string());
+            .unwrap_or_else(|_| "midgard".to_string());
 
         let host = env::var("HOST").unwrap_or_else(|_| "0.0.0.0".to_string());
-        let port = env::var("PORT").unwrap_or_else(|_| "3000".to_string()).parse::<u16>().expect("Invalid PORT value");
+        let port = env::var("PORT").unwrap_or_else(|_| "10000".to_string());
 
         Config {
             api_url,

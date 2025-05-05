@@ -3,7 +3,7 @@ mod models;
 mod db;
 mod api;
 
-use api::handlers::{clear_databases, fetch_and_update_rune_pool, get_rune_pool, update_rune_pool, AppState};
+use api::handlers::{clear_databases, fetch_and_update_rune_pool, get_rune_pool, update_rune_pool, health_check, AppState};
 use axum::{routing::get, routing::post, routing::delete, Router};
 use config::Config;
 use tracing::info;
@@ -32,6 +32,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .route("/get", get(get_rune_pool))
         .route("/fetch-and-update", post(fetch_and_update_rune_pool))
         .route("/clear", delete(clear_databases))
+        .route("/health", get(health_check))
         .with_state(state);
 
     let addr = format!("{}:{}", &config.host, &config.port);
