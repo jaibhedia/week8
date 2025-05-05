@@ -7,9 +7,9 @@ use crate::db::surrealdb::SurrealDBClient;
 use crate::models::rune_pool::{ApiRunePoolResponse, DbRunePoolResponse};
 use axum::{extract::State, http::StatusCode, response::IntoResponse, Json};
 use reqwest::Client as HttpClient;
+use serde::Deserialize;
 use serde_json::json;
 use std::collections::HashMap;
-use std::error::Error;
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::sync::Mutex;
@@ -26,12 +26,12 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub async fn new(config: Config) -> Result<Self, Box<dyn Error>> {
-        let leveldb = Arc::new(LevelDBClient::new(&config)?);
-        let rocksdb = Arc::new(RocksDBClient::new(&config)?);
-        let surrealdb = Arc::new(Mutex::new(SurrealDBClient::new(&config).await?));
-        let psql = Arc::new(Mutex::new(PsqlClient::new(&config).await?));
-        let mongodb = Arc::new(Mutex::new(MongoDBClient::new(&config).await?));
+    pub async fn new(config: Config) -> Result<Self, String> {
+        let leveldb = Arc::new(LevelDBClient::new(&config).map_err(|e| e.to_string())?);
+        let rocksdb = Arc::new(RocksDBClient::new(&config).map_err(|e| e.to_string())?);
+        let surrealdb = Arc::new(Mutex::new(SurrealDBClient::new(&config).await.map_err(|e| e.to_string())?));
+        let psql = Arc::new(Mutex::new(PsqlClient::new(&config).await.map_err(|e| e.to_string())?));
+        let mongodb = Arc::new(Mutex::new(MongoDBClient::new(&config).await.map_err(|e| e.to_string())?));
         let http_client = HttpClient::new();
 
         Ok(AppState {
@@ -46,6 +46,12 @@ impl AppState {
     }
 }
 
+// Update request type
+#[derive(Debug, Deserialize)]
+pub struct UpdateRequest {
+    count: Option<usize>,
+}
+
 pub async fn update_rune_pool(
     State(state): State<AppState>,
     Json(payload): Json<ApiRunePoolResponse>,
@@ -53,22 +59,27 @@ pub async fn update_rune_pool(
     let db_response: DbRunePoolResponse = payload.clone().into();
     let mut timings = HashMap::new();
 
+    // LevelDB
     let start = Instant::now();
     state.leveldb.update_rune_pool(&db_response).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("leveldb", start.elapsed().as_millis());
 
+    // RocksDB
     let start = Instant::now();
     state.rocksdb.update_rune_pool(&db_response).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("rocksdb", start.elapsed().as_millis());
 
+    // SurrealDB
     let start = Instant::now();
     state.surrealdb.lock().await.update_rune_pool(&db_response).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("surrealdb", start.elapsed().as_millis());
 
+    // PostgreSQL
     let start = Instant::now();
     state.psql.lock().await.update_rune_pool(&db_response).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("psql", start.elapsed().as_millis());
 
+    // MongoDB
     let start = Instant::now();
     state.mongodb.lock().await.update_rune_pool(&db_response).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("mongodb", start.elapsed().as_millis());
@@ -125,12 +136,17 @@ pub async fn get_rune_pool(
 
 pub async fn fetch_and_update_rune_pool(
     State(state): State<AppState>,
+    Json(req): Json<UpdateRequest>,
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
+    // Allow custom count or use default
+    let count = req.count.unwrap_or(400);
+    
     let url = format!(
-        "{}?interval={}&from={}&count=400",
+        "{}?interval={}&from={}&count={}",
         state.config.api_url,
         state.config.interval,
-        state.config.initial_from
+        state.config.initial_from,
+        count
     );
 
     let response = state
@@ -146,22 +162,27 @@ pub async fn fetch_and_update_rune_pool(
     let db_response: DbRunePoolResponse = response.clone().into();
     let mut timings = HashMap::new();
 
+    // LevelDB
     let start = Instant::now();
     state.leveldb.update_rune_pool(&db_response).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("leveldb", start.elapsed().as_millis());
 
+    // RocksDB
     let start = Instant::now();
     state.rocksdb.update_rune_pool(&db_response).map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("rocksdb", start.elapsed().as_millis());
 
+    // SurrealDB
     let start = Instant::now();
     state.surrealdb.lock().await.update_rune_pool(&db_response).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("surrealdb", start.elapsed().as_millis());
 
+    // PostgreSQL
     let start = Instant::now();
     state.psql.lock().await.update_rune_pool(&db_response).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("psql", start.elapsed().as_millis());
 
+    // MongoDB
     let start = Instant::now();
     state.mongodb.lock().await.update_rune_pool(&db_response).await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("mongodb", start.elapsed().as_millis());
@@ -177,25 +198,30 @@ pub async fn clear_databases(
 ) -> Result<impl IntoResponse, (StatusCode, String)> {
     let mut timings = HashMap::new();
 
+    // LevelDB
     let start = Instant::now();
     state.leveldb.clear().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("leveldb", start.elapsed().as_millis());
 
+    // RocksDB
     let start = Instant::now();
     state.rocksdb.clear().map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("rocksdb", start.elapsed().as_millis());
 
+    // SurrealDB
     let start = Instant::now();
     state.surrealdb.lock().await.clear().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("surrealdb", start.elapsed().as_millis());
 
+    // PostgreSQL
     let start = Instant::now();
     state.psql.lock().await.clear().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("psql", start.elapsed().as_millis());
 
+    // MongoDB
     let start = Instant::now();
     state.mongodb.lock().await.clear().await.map_err(|e| (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()))?;
     timings.insert("mongodb", start.elapsed().as_millis());
 
-    Ok((StatusCode::OK, Json(json!({ "timings": timings })))) // Changed to 200 OK with timings
+    Ok((StatusCode::OK, Json(json!({ "timings": timings }))))
 }

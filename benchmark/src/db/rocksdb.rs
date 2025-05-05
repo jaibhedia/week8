@@ -2,21 +2,33 @@ use crate::config::Config;
 use crate::models::rune_pool::{DbInterval, DbMeta, DbRunePoolResponse};
 use rocksdb::{Options, DB};
 use serde_json;
-use std::error::Error;
+use thiserror::Error;
+
+#[derive(Error, Debug)]
+pub enum RocksDBError {
+    #[error("RocksDB error: {0}")]
+    DBError(#[from] rocksdb::Error),
+    
+    #[error("Serialization error: {0}")]
+    SerdeError(#[from] serde_json::Error),
+    
+    #[error("Data not found: {0}")]
+    NotFoundError(String),
+}
 
 pub struct RocksDBClient {
     db: DB,
 }
 
 impl RocksDBClient {
-    pub fn new(config: &Config) -> Result<Self, Box<dyn Error>> {
+    pub fn new(config: &Config) -> Result<Self, RocksDBError> {
         let mut opts = Options::default();
         opts.create_if_missing(true);
         let db = DB::open(&opts, &config.rocksdb_path)?;
         Ok(RocksDBClient { db })
     }
 
-    pub fn update_rune_pool(&self, response: &DbRunePoolResponse) -> Result<(), Box<dyn Error>> {
+    pub fn update_rune_pool(&self, response: &DbRunePoolResponse) -> Result<(), RocksDBError> {
         let meta_key = "meta".as_bytes();
         let meta_value = serde_json::to_vec(&response.meta)?;
         self.db.put(meta_key, meta_value)?;
@@ -29,9 +41,11 @@ impl RocksDBClient {
         Ok(())
     }
 
-    pub fn get_rune_pool(&self) -> Result<DbRunePoolResponse, Box<dyn Error>> {
+    pub fn get_rune_pool(&self) -> Result<DbRunePoolResponse, RocksDBError> {
         let meta_key = "meta".as_bytes();
-        let meta_value = self.db.get(meta_key)?.ok_or("Meta not found")?;
+        let meta_value = self.db.get(meta_key)?
+            .ok_or_else(|| RocksDBError::NotFoundError("Meta not found".to_string()))?;
+            
         let meta: DbMeta = serde_json::from_slice(&meta_value)?;
 
         let mut intervals = Vec::new();
@@ -50,7 +64,7 @@ impl RocksDBClient {
         Ok(DbRunePoolResponse { meta, intervals })
     }
 
-    pub fn clear(&self) -> Result<(), Box<dyn Error>> {
+    pub fn clear(&self) -> Result<(), RocksDBError> {
         self.db.delete("meta".as_bytes())?;
         let mut index = 0;
         loop {
