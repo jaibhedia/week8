@@ -14,18 +14,15 @@ pub struct LevelDBClient {
 
 impl LevelDBClient {
     pub fn new(config: &Config) -> Result<Self, Box<dyn Error>> {
+        // Try to create directory if it doesn't exist
+        if let Err(err) = std::fs::create_dir_all(&config.leveldb_path) {
+            warn!("Failed to create LevelDB directory: {}", err);
+        }
+        
         let mut options = Options::new();
         options.create_if_missing = true;
-        let db = match Database::open(Path::new(&config.leveldb_path), options) {
-            Ok(db) => db,
-            Err(e) => {
-                // Try to create directory if it doesn't exist
-                if let Err(err) = std::fs::create_dir_all(&config.leveldb_path) {
-                    warn!("Failed to create LevelDB directory: {}", err);
-                }
-                Database::open(Path::new(&config.leveldb_path), options)?
-            }
-        };
+        let db = Database::open(Path::new(&config.leveldb_path), options)?;
+        
         Ok(LevelDBClient { db })
     }
 
@@ -38,7 +35,7 @@ impl LevelDBClient {
         for (index, interval) in response.intervals.iter().enumerate() {
             let key = (index + 1) as i32; // Use index + 1 as key for intervals, to avoid collision with meta
             let value = serde_json::to_vec(interval)?;
-            self.db.put(write_options, key, &value)?;
+            self.db.put(WriteOptions::new(), key, &value)?;
         }
         Ok(())
     }
@@ -48,7 +45,7 @@ impl LevelDBClient {
         let meta_key = 0;
         
         // Get meta data
-        let meta_value = match self.db.get(read_options.clone(), meta_key)? {
+        let meta_value = match self.db.get(read_options, meta_key)? {
             Some(value) => value,
             None => {
                 // Return empty response with default values if no data exists
@@ -73,7 +70,7 @@ impl LevelDBClient {
         let mut index = 1; // Start from 1 since 0 is used for meta
         loop {
             let key = index as i32;
-            match self.db.get(read_options.clone(), key)? {
+            match self.db.get(ReadOptions::new(), key)? {
                 Some(value) => {
                     let interval: DbInterval = serde_json::from_slice(&value)?;
                     intervals.push(interval);
@@ -88,19 +85,18 @@ impl LevelDBClient {
 
     pub fn clear(&self) -> Result<(), Box<dyn Error>> {
         let write_options = WriteOptions::new();
-        let read_options = ReadOptions::new();
         
         // Delete meta
-        if self.db.get(read_options.clone(), 0)?.is_some() {
-            self.db.delete(write_options.clone(), 0)?;
+        if self.db.get(ReadOptions::new(), 0)?.is_some() {
+            self.db.delete(write_options, 0)?;
         }
         
         // Delete intervals
         let mut index = 1;
         loop {
             let key = index as i32;
-            if self.db.get(read_options.clone(), key)?.is_some() {
-                self.db.delete(write_options.clone(), key)?;
+            if self.db.get(ReadOptions::new(), key)?.is_some() {
+                self.db.delete(WriteOptions::new(), key)?;
                 index += 1;
             } else {
                 break;

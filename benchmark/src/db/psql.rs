@@ -1,6 +1,6 @@
 use crate::config::Config;
 use crate::models::rune_pool::{DbInterval, DbMeta, DbRunePoolResponse};
-use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
+use sqlx::{postgres::PgPoolOptions, Pool, Postgres, Row};
 use tracing::{info, warn};
 use std::error::Error;
 

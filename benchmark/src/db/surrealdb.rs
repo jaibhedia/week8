@@ -85,7 +85,7 @@ impl SurrealDBClient {
         let metas: Vec<DbMeta> = match self.db
             .query("SELECT start_time, end_time, start_count, end_count, start_units, end_units FROM meta")
             .await {
-                Ok(response) => match response.take(0) {
+                Ok(mut response) => match response.take(0) {
                     Ok(data) => data,
                     Err(e) => {
                         warn!("Error extracting meta data: {}", e);
@@ -130,7 +130,7 @@ impl SurrealDBClient {
         let intervals: Vec<DbInterval> = match self.db
             .query("SELECT start_time, end_time, count, units FROM interval ORDER BY start_time ASC")
             .await {
-                Ok(response) => match response.take(0) {
+                Ok(mut response) => match response.take(0) {
                     Ok(data) => data,
                     Err(_) => vec![],
                 },
