@@ -1,21 +1,37 @@
 use crate::config::Config;
 use crate::models::rune_pool::{DbInterval, DbMeta, DbRunePoolResponse};
-use sqlx::PgPool;
+use sqlx::{postgres::PgPoolOptions, Pool, Postgres};
+use tracing::{info, warn};
 use std::error::Error;
-use sqlx::Row;
+
 pub struct PsqlClient {
-    pool: PgPool,
+    pool: Pool<Postgres>,
 }
 
 impl PsqlClient {
     pub async fn new(config: &Config) -> Result<Self, Box<dyn Error>> {
-        let pool = PgPool::connect(&config.psql_conn).await?;
-        Ok(PsqlClient { pool })
+        let pool = PgPoolOptions::new()
+            .max_connections(5)
+            .connect(&config.psql_conn)
+            .await?;
+            
+        // Initialize database tables
+        let client = PsqlClient { pool };
+        if let Err(err) = client.init_tables().await {
+            warn!("Failed to initialize PostgreSQL tables: {}", err);
+        } else {
+            info!("PostgreSQL tables initialized successfully");
+        }
+        
+        Ok(client)
     }
-
-    pub async fn update_rune_pool(&self, response: &DbRunePoolResponse) -> Result<(), Box<dyn Error>> {
+    
+    // Add a method to initialize database tables
+    async fn init_tables(&self) -> Result<(), Box<dyn Error>> {
+        // Create meta table
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS meta (
+            r#"
+            CREATE TABLE IF NOT EXISTS meta (
                 id SERIAL PRIMARY KEY,
                 start_time BIGINT NOT NULL,
                 end_time BIGINT NOT NULL,
@@ -23,23 +39,31 @@ impl PsqlClient {
                 end_count BIGINT NOT NULL,
                 start_units BIGINT NOT NULL,
                 end_units BIGINT NOT NULL
-            )"
+            )
+            "#,
         )
         .execute(&self.pool)
         .await?;
 
+        // Create intervals table
         sqlx::query(
-            "CREATE TABLE IF NOT EXISTS intervals (
+            r#"
+            CREATE TABLE IF NOT EXISTS intervals (
                 id SERIAL PRIMARY KEY,
                 start_time BIGINT NOT NULL,
                 end_time BIGINT NOT NULL,
                 count BIGINT NOT NULL,
                 units BIGINT NOT NULL
-            )"
+            )
+            "#,
         )
         .execute(&self.pool)
         .await?;
 
+        Ok(())
+    }
+
+    pub async fn update_rune_pool(&self, response: &DbRunePoolResponse) -> Result<(), Box<dyn Error>> {
         sqlx::query("DELETE FROM meta").execute(&self.pool).await?;
         sqlx::query("DELETE FROM intervals").execute(&self.pool).await?;
 

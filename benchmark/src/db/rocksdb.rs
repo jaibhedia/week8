@@ -3,6 +3,8 @@ use crate::models::rune_pool::{DbInterval, DbMeta, DbRunePoolResponse};
 use rocksdb::{Options, DB};
 use serde_json;
 use thiserror::Error;
+use tracing::warn;
+use std::fs;
 
 #[derive(Error, Debug)]
 pub enum RocksDBError {
@@ -24,6 +26,13 @@ impl RocksDBClient {
     pub fn new(config: &Config) -> Result<Self, RocksDBError> {
         let mut opts = Options::default();
         opts.create_if_missing(true);
+        
+        // Ensure the directory exists
+        if let Err(err) = fs::create_dir_all(&config.rocksdb_path) {
+            warn!("Failed to create RocksDB directory: {}", err);
+            // Continue anyway, the open call will fail if there's a real problem
+        }
+        
         let db = DB::open(&opts, &config.rocksdb_path)?;
         Ok(RocksDBClient { db })
     }
@@ -43,8 +52,23 @@ impl RocksDBClient {
 
     pub fn get_rune_pool(&self) -> Result<DbRunePoolResponse, RocksDBError> {
         let meta_key = "meta".as_bytes();
-        let meta_value = self.db.get(meta_key)?
-            .ok_or_else(|| RocksDBError::NotFoundError("Meta not found".to_string()))?;
+        let meta_value = match self.db.get(meta_key)? {
+            Some(data) => data,
+            None => {
+                // Return default empty response if no data exists
+                return Ok(DbRunePoolResponse {
+                    meta: DbMeta {
+                        start_time: 0,
+                        end_time: 0,
+                        start_count: 0,
+                        end_count: 0,
+                        start_units: 0,
+                        end_units: 0,
+                    },
+                    intervals: vec![],
+                });
+            }
+        };
             
         let meta: DbMeta = serde_json::from_slice(&meta_value)?;
 
@@ -65,7 +89,12 @@ impl RocksDBClient {
     }
 
     pub fn clear(&self) -> Result<(), RocksDBError> {
-        self.db.delete("meta".as_bytes())?;
+        // Delete meta if it exists
+        if self.db.get("meta".as_bytes())?.is_some() {
+            self.db.delete("meta".as_bytes())?;
+        }
+        
+        // Delete all intervals
         let mut index = 0;
         loop {
             let key = format!("interval_{}", index).into_bytes();

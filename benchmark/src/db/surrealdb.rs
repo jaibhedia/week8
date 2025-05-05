@@ -4,6 +4,7 @@ use surrealdb::engine::remote::ws::{Ws, Client};
 use surrealdb::opt::auth::Root;
 use surrealdb::Surreal;
 use thiserror::Error;
+use tracing::warn;
 
 #[derive(Error, Debug)]
 pub enum SurrealDBError {
@@ -42,6 +43,10 @@ impl SurrealDBClient {
     }
 
     pub async fn update_rune_pool(&self, response: &DbRunePoolResponse) -> Result<(), SurrealDBError> {
+        // Clear existing data first
+        self.clear().await?;
+
+        // Create meta record
         self.db
             .query("CREATE meta SET start_time = $start_time, end_time = $end_time, start_count = $start_count, end_count = $end_count, start_units = $start_units, end_units = $end_units")
             .bind(("start_time", response.meta.start_time))
@@ -55,6 +60,7 @@ impl SurrealDBClient {
             .check()
             .map_err(|e| SurrealDBError::Other(e.to_string()))?;
 
+        // Create interval records
         for interval in &response.intervals {
             let query = format!(
                 "CREATE interval:{} SET start_time = $start_time, end_time = $end_time, count = $count, units = $units",
@@ -76,35 +82,74 @@ impl SurrealDBClient {
     }
 
     pub async fn get_rune_pool(&self) -> Result<DbRunePoolResponse, SurrealDBError> {
-        let metas: Vec<DbMeta> = self.db
+        let metas: Vec<DbMeta> = match self.db
             .query("SELECT start_time, end_time, start_count, end_count, start_units, end_units FROM meta")
-            .await
-            .map_err(SurrealDBError::ConnectionError)?
-            .take(0)
-            .map_err(|e| SurrealDBError::Other(e.to_string()))?;
-        let meta = metas.into_iter().next().ok_or(SurrealDBError::NotFoundError("Meta not found".to_string()))?;
+            .await {
+                Ok(response) => match response.take(0) {
+                    Ok(data) => data,
+                    Err(e) => {
+                        warn!("Error extracting meta data: {}", e);
+                        return Ok(DbRunePoolResponse {
+                            meta: DbMeta {
+                                start_time: 0,
+                                end_time: 0,
+                                start_count: 0,
+                                end_count: 0,
+                                start_units: 0,
+                                end_units: 0,
+                            },
+                            intervals: vec![],
+                        });
+                    }
+                },
+                Err(e) => {
+                    warn!("Error querying meta data: {}", e);
+                    return Ok(DbRunePoolResponse {
+                        meta: DbMeta {
+                            start_time: 0,
+                            end_time: 0,
+                            start_count: 0,
+                            end_count: 0,
+                            start_units: 0,
+                            end_units: 0,
+                        },
+                        intervals: vec![],
+                    });
+                }
+            };
+            
+        let meta = metas.into_iter().next().unwrap_or_else(|| DbMeta {
+            start_time: 0,
+            end_time: 0,
+            start_count: 0,
+            end_count: 0,
+            start_units: 0,
+            end_units: 0,
+        });
 
-        let intervals: Vec<DbInterval> = self.db
+        let intervals: Vec<DbInterval> = match self.db
             .query("SELECT start_time, end_time, count, units FROM interval ORDER BY start_time ASC")
-            .await
-            .map_err(SurrealDBError::ConnectionError)?
-            .take(0)
-            .map_err(|e| SurrealDBError::Other(e.to_string()))?;
+            .await {
+                Ok(response) => match response.take(0) {
+                    Ok(data) => data,
+                    Err(_) => vec![],
+                },
+                Err(_) => vec![],
+            };
 
         Ok(DbRunePoolResponse { meta, intervals })
     }
 
     pub async fn clear(&self) -> Result<(), SurrealDBError> {
-        self.db.query("DELETE meta")
+        // Ignore errors if tables don't exist yet
+        let _ = self.db.query("DELETE meta")
             .await
             .map_err(SurrealDBError::ConnectionError)?
-            .check()
-            .map_err(|e| SurrealDBError::Other(e.to_string()))?;
-        self.db.query("DELETE interval")
+            .check();
+        let _ = self.db.query("DELETE interval")
             .await
             .map_err(SurrealDBError::ConnectionError)?
-            .check()
-            .map_err(|e| SurrealDBError::Other(e.to_string()))?;
+            .check();
         Ok(())
     }
 }
